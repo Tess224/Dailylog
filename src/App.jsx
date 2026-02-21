@@ -3,21 +3,16 @@ import Stickman from './Stickman.jsx'
 import SpeechBubble from './SpeechBubble.jsx'
 import { Message, ThinkingDots } from './ChatMessage.jsx'
 import { useSpeechRecognition } from './useSpeechRecognition.js'
-import { POSES, AI_REPLIES } from './data.js'
+import { POSES, AI_REPLIES, KEYWORD_POSES } from './data.js'
 
 const lerp = (a, b, t) => a + (b - a) * t
-
-// ── Detect mobile once ────────────────────────────────────────────────────
 const isMobile = () => window.innerWidth < 768
 
 const GLOBAL_STYLES = `
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
   @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
-
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { overflow: hidden; }
 
-  /* Desktop: side by side. Mobile: stack vertically */
   .stage {
     display: grid;
     grid-template-columns: 1fr 400px;
@@ -28,7 +23,6 @@ const GLOBAL_STYLES = `
     border-right: 3px solid #1a1a1a;
     position: relative;
     overflow: hidden;
-    min-height: 0;
   }
   .chat-panel {
     display: flex;
@@ -47,17 +41,13 @@ const GLOBAL_STYLES = `
   }
 
   @media (max-width: 767px) {
-    body { overflow: auto; }
     .stage {
       grid-template-columns: 1fr;
-      grid-template-rows: 52vh 1fr;
+      grid-template-rows: 50vh 1fr;
     }
     .canvas-area {
       border-right: none;
       border-bottom: 3px solid #1a1a1a;
-    }
-    .chat-log {
-      max-height: 35vh;
     }
   }
 `
@@ -80,14 +70,12 @@ export default function App() {
   const replyIdx    = useRef(0)
   const speechTimer = useRef(null)
 
-  // ── Responsive listener ───────────────────────────────────────────────
   useEffect(() => {
     const onResize = () => setMobile(isMobile())
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // ── Walk-in on mount ──────────────────────────────────────────────────
   useEffect(() => {
     let prog = 0
     const id = setInterval(() => {
@@ -107,12 +95,10 @@ export default function App() {
     return () => clearInterval(id)
   }, [])
 
-  // ── Auto-scroll chat ──────────────────────────────────────────────────
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
   }, [messages, thinking])
 
-  // ── Helpers ───────────────────────────────────────────────────────────
   const showSpeech = useCallback((text, duration = 3000) => {
     clearTimeout(speechTimer.current)
     setSpeech(text)
@@ -127,36 +113,67 @@ export default function App() {
     setCaption(p.caption)
   }, [])
 
-  // ── Send ──────────────────────────────────────────────────────────────
+  // Walk stickman across stage and back
+  const doWalk = useCallback(() => {
+    const dir = Math.random() > 0.5 ? 1 : -1
+    const target = 50 + dir * 28
+    let prog = 0
+    const go = setInterval(() => {
+      prog += 3
+      const t = Math.min(prog / 40, 1)
+      setWalkProgress(prog)
+      setStickX(50 + (target - 50) * t)
+      if (t >= 1) {
+        clearInterval(go)
+        let prog2 = 0
+        const back = setInterval(() => {
+          prog2 += 3
+          const t2 = Math.min(prog2 / 40, 1)
+          setWalkProgress(prog2)
+          setStickX(target + (50 - target) * t2)
+          if (t2 >= 1) { clearInterval(back); setWalkProgress(100); setStickX(50) }
+        }, 32)
+      }
+    }, 32)
+  }, [])
+
   const handleSend = useCallback(async (overrideText) => {
     const text = (overrideText ?? input).trim()
     if (!text) return
     setInput('')
-
     setMessages(prev => [...prev, { id: Date.now(), role: 'user', text }])
     applyPose('nodding')
     setThinking(true)
 
     // ↓ Replace with your real API call
-    await new Promise(r => setTimeout(r, 1000 + Math.random() * 900))
-    const reply = AI_REPLIES[replyIdx.current % AI_REPLIES.length]
+    await new Promise(r => setTimeout(r, 900 + Math.random() * 800))
+    const lower = text.toLowerCase()
+    let detectedPose = null
+    for (const [poseName, keywords] of Object.entries(KEYWORD_POSES)) {
+      if (keywords.some(kw => lower.includes(kw))) { detectedPose = poseName; break }
+    }
+    const reply = { ...AI_REPLIES[replyIdx.current % AI_REPLIES.length] }
+    if (detectedPose) reply.pose = detectedPose
     replyIdx.current++
     // ↑ --------------------------------
 
     setThinking(false)
 
-    if (replyIdx.current % 4 === 0) {
+    if (replyIdx.current % 3 === 0) {
+      applyPose('walking')
+      doWalk()
+      await new Promise(r => setTimeout(r, 2200))
+    } else if (replyIdx.current % 5 === 0) {
       applyPose('stretching')
-      await new Promise(r => setTimeout(r, 750))
+      await new Promise(r => setTimeout(r, 900))
     }
 
     applyPose(reply.pose)
     showSpeech(reply.speech, 3200)
     setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', text: reply.text }])
-    setTimeout(() => applyPose('idle'), 3500)
-  }, [input, applyPose, showSpeech])
+    setTimeout(() => applyPose('idle'), 4000)
+  }, [input, applyPose, showSpeech, doWalk])
 
-  // ── Mic ───────────────────────────────────────────────────────────────
   const { recording, toggle: toggleMic, isSupported } = useSpeechRecognition({
     onResult: (t) => setInput(t),
     onEnd: () => { applyPose('idle'); setInput(prev => { handleSend(prev); return prev }) },
@@ -166,35 +183,34 @@ export default function App() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  // Stickman size: bigger on desktop, compact on mobile
-  const stickW = mobile ? 160 : 300
-  const stickH = mobile ? 320 : 600
-  const groundBottom = mobile ? 80 : 110
-  const stickBottom  = mobile ? groundBottom - 10 : groundBottom - 15
+  // Stickman sizing per breakpoint
+  const stickW      = mobile ? 130 : 300
+  const stickH      = mobile ? 260 : 600
+  const groundBot   = mobile ? 70  : 110
+  const stickBot    = mobile ? 58  : 95
 
   return (
     <div style={{
       height: '100dvh', background: '#f5f0e8',
       backgroundImage: 'radial-gradient(circle, #c9bfa5 1px, transparent 1px)',
       backgroundSize: '28px 28px', fontFamily: "'Courier Prime', monospace",
-      color: '#1a1a1a', display: 'flex', flexDirection: 'column',
+      color: '#1a1a1a', display: 'flex', flexDirection: 'column', overflow: 'hidden',
     }}>
       <style>{GLOBAL_STYLES}</style>
 
       {/* NAV */}
       <nav style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: mobile ? '12px 20px' : '14px 32px',
-        borderBottom: '3px solid #1a1a1a', background: '#f5f0e8',
-        flexShrink: 0, zIndex: 100,
+        padding: mobile ? '10px 16px' : '14px 32px',
+        borderBottom: '3px solid #1a1a1a', background: '#f5f0e8', flexShrink: 0,
       }}>
-        <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: mobile ? 22 : 26, letterSpacing: 4 }}>
+        <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: mobile ? 20 : 26, letterSpacing: 4 }}>
           DAYLOG_
         </div>
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 6, fontSize: 10,
-          letterSpacing: 2, textTransform: 'uppercase', border: '2px solid #1a1a1a',
-          padding: mobile ? '5px 10px' : '6px 14px',
+          display: 'flex', alignItems: 'center', gap: 6,
+          fontSize: 10, letterSpacing: 2, textTransform: 'uppercase',
+          border: '2px solid #1a1a1a', padding: mobile ? '4px 8px' : '6px 14px',
         }}>
           <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#1a1a1a', animation: 'blink 1.2s infinite' }} />
           {mobile ? 'ONLINE' : 'COMPANION ONLINE'}
@@ -204,20 +220,15 @@ export default function App() {
       {/* STAGE */}
       <div className="stage">
 
-        {/* CANVAS — stickman lives here */}
+        {/* CANVAS */}
         <div className="canvas-area">
-          <Label top={14} left={14} small={mobile}>STAGE_01</Label>
+          <Label top={12} left={12} small={mobile}>STAGE_01</Label>
           <EmotionTag small={mobile}>{emotion}</EmotionTag>
 
-          {/* Ground line */}
-          <div style={{
-            position: 'absolute', bottom: groundBottom,
-            left: 0, width: '100%', height: 3, background: '#1a1a1a',
-          }} />
+          <div style={{ position: 'absolute', bottom: groundBot, left: 0, width: '100%', height: 3, background: '#1a1a1a' }} />
 
-          {/* Caption */}
           <div style={{
-            position: 'absolute', bottom: mobile ? 48 : 68,
+            position: 'absolute', bottom: mobile ? 40 : 62,
             width: '100%', textAlign: 'center',
             fontSize: 10, letterSpacing: 3, textTransform: 'uppercase',
             opacity: 0.4, fontFamily: "'Space Mono', monospace",
@@ -225,39 +236,23 @@ export default function App() {
             {caption}
           </div>
 
-          {/* Stickman */}
           <div style={{
-            position: 'absolute',
-            bottom: stickBottom,
-            left: `${stickX}%`,
-            transform: 'translateX(-50%)',
-            width: stickW,
-            height: stickH,
-            opacity: stickOpacity,
+            position: 'absolute', bottom: stickBot,
+            left: `${stickX}%`, transform: 'translateX(-50%)',
+            width: stickW, height: stickH, opacity: stickOpacity,
           }}>
             <SpeechBubble text={speech} visible={speechVisible} />
             <Stickman pose={pose} walkProgress={walkProgress} />
           </div>
-
-          {/* Decorative rule marks */}
-          <svg style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: 80, opacity: 0.1 }}
-            viewBox="0 0 400 80" preserveAspectRatio="none">
-            <line x1="0" y1="40" x2="400" y2="40" stroke="#1a1a1a" strokeWidth="1" />
-            {[100, 200, 300].map(x => (
-              <line key={x} x1={x} y1="32" x2={x} y2="48" stroke="#1a1a1a" strokeWidth="1.5" />
-            ))}
-          </svg>
         </div>
 
         {/* CHAT PANEL */}
         <div className="chat-panel">
-          {/* Header — hide on mobile to save space */}
           {!mobile && (
             <div style={{
-              padding: '18px 24px', borderBottom: '3px solid #1a1a1a',
+              padding: '16px 24px', borderBottom: '3px solid #1a1a1a',
               fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, letterSpacing: 3,
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              flexShrink: 0,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
             }}>
               <span>CONVERSATION</span>
               <span style={{ fontSize: 11, fontFamily: "'Space Mono'", fontWeight: 400, opacity: 0.45, letterSpacing: 1 }}>
@@ -279,7 +274,8 @@ export default function App() {
 
           {/* Input */}
           <div style={{
-            borderTop: '3px solid #1a1a1a', padding: mobile ? '10px 12px' : '14px 20px',
+            borderTop: '3px solid #1a1a1a',
+            padding: mobile ? '10px 12px' : '14px 20px',
             background: '#fff9f0', flexShrink: 0,
           }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -291,8 +287,7 @@ export default function App() {
                 style={{
                   flex: 1, background: '#f5f0e8', border: '2.5px solid #1a1a1a',
                   padding: '10px 14px', fontFamily: "'Courier Prime', monospace",
-                  fontSize: 13, resize: 'none', outline: 'none',
-                  height: 46, lineHeight: 1.4,
+                  fontSize: 13, resize: 'none', outline: 'none', height: 46, lineHeight: 1.4,
                 }}
               />
               <button
@@ -301,8 +296,8 @@ export default function App() {
                 style={{
                   width: 46, height: 46, flexShrink: 0,
                   border: `2.5px solid ${recording ? '#c0392b' : '#1a1a1a'}`,
-                  background: recording ? '#c0392b' : '#1a1a1a',
-                  color: '#f5f0e8', cursor: isSupported ? 'pointer' : 'not-allowed',
+                  background: recording ? '#c0392b' : '#1a1a1a', color: '#f5f0e8',
+                  cursor: isSupported ? 'pointer' : 'not-allowed',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 17, animation: recording ? 'pulse 0.8s infinite' : 'none',
                   opacity: isSupported ? 1 : 0.4,
@@ -325,14 +320,12 @@ export default function App() {
   )
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────
 function Label({ top, left, small, children }) {
   return (
     <div style={{
       position: 'absolute', top, left,
-      fontFamily: "'Bebas Neue', sans-serif",
-      fontSize: small ? 11 : 13, letterSpacing: 3,
-      border: '2px solid #1a1a1a', padding: '3px 8px', background: '#f5f0e8',
+      fontFamily: "'Bebas Neue', sans-serif", fontSize: small ? 10 : 13,
+      letterSpacing: 3, border: '2px solid #1a1a1a', padding: '3px 8px', background: '#f5f0e8',
     }}>
       {children}
     </div>
@@ -342,12 +335,10 @@ function Label({ top, left, small, children }) {
 function EmotionTag({ small, children }) {
   return (
     <div style={{
-      position: 'absolute', top: small ? 14 : 18, right: small ? 14 : 18,
-      fontFamily: "'Bebas Neue', sans-serif",
-      fontSize: small ? 12 : 15, letterSpacing: 2,
-      border: '2.5px solid #1a1a1a', padding: '3px 10px',
-      background: '#1a1a1a', color: '#f5f0e8',
-      minWidth: 60, textAlign: 'center', transition: 'all 0.3s',
+      position: 'absolute', top: small ? 12 : 18, right: small ? 12 : 18,
+      fontFamily: "'Bebas Neue', sans-serif", fontSize: small ? 11 : 15,
+      letterSpacing: 2, border: '2.5px solid #1a1a1a', padding: '3px 10px',
+      background: '#1a1a1a', color: '#f5f0e8', minWidth: 55, textAlign: 'center', transition: 'all 0.3s',
     }}>
       {children}
     </div>
@@ -362,13 +353,12 @@ function SendButton({ onClick, small, children }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        padding: small ? '0 14px' : '0 20px',
-        height: 46, border: '2.5px solid #1a1a1a',
+        padding: small ? '0 12px' : '0 20px', height: 46, flexShrink: 0,
+        border: '2.5px solid #1a1a1a',
         background: hovered ? '#1a1a1a' : '#f5f0e8',
         color: hovered ? '#f5f0e8' : '#1a1a1a',
-        fontFamily: "'Bebas Neue', sans-serif",
-        fontSize: small ? 14 : 16, letterSpacing: 2,
-        cursor: 'pointer', transition: 'all 0.15s', flexShrink: 0,
+        fontFamily: "'Bebas Neue', sans-serif", fontSize: small ? 13 : 16,
+        letterSpacing: 2, cursor: 'pointer', transition: 'all 0.15s',
       }}
     >
       {children}
