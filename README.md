@@ -1,3 +1,4 @@
+
 # DAYLOG_ — Voice AI Companion
 
 A comic-style voice journal app with an animated stickman companion.
@@ -7,12 +8,7 @@ A comic-style voice journal app with an animated stickman companion.
 ```
 src/
   App.jsx                 # Main layout + orchestration
-  Stickman.jsx            # Animated SVG stickman
-  SpeechBubble.jsx        # Floating speech bubble
-  ChatMessage.jsx         # Message + thinking dots
-  useSpeechRecognition.js # Web Speech API hook
-  data.js                 # Poses + mock AI replies
-  main.jsx                # React entry point
+  Stickman.jsx            # Animated SVG stickman     # React entry point
 ```
 
 ## Local Development
@@ -60,8 +56,4 @@ Pass any of these as the `pose` field from your backend:
 |-------------|-------------------------------|
 | idle        | Default standing               |
 | talking     | AI is speaking                 |
-| nodding     | Listening / agreeing           |
-| thinking    | Processing / pondering         |
-| happy       | Good news / excitement         |
-| surprised   | Shocking news                  |
-| stretching  | Occasional idle break          |
+| nodding     | Liste
